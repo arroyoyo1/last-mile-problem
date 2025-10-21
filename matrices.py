@@ -60,8 +60,10 @@ if __name__ == '__main__':
     np.save('distance_matrix.npy', dist_matrix)
     np.save('time_matrix.npy', time_matrix)
     np.save('stop.ids.npy', stop_ids)
-    dist_matrix = np.load('distance_matrix.npy')
-    time_matrix = np.load('time_matrix.npy')
+    dist_matrix = np.load('datos/distance_matrix.npy')
+    time_matrix = np.load('datos/time_matrix.npy')
+    stop_ids = np.load("datos/stop_ids.npy")
     print(dist_matrix[:5, :5])
     print(time_matrix[:5, :5])
-    
+    print(stop_ids)
+
