@@ -3,6 +3,10 @@ import pandas as pd
 from sklearn.cluster import KMeans
 import json
 import random
+import matplotlib.pyplot as plt
+import seaborn as sns
+import folium
+
 
 
 def mapping():
@@ -32,18 +36,15 @@ def cluster_stops(k):
         stop2int = json.load(f) # load lo convieret automáticamente a un diccionario
     
     # coordenadas de las paradas
-    coords = df[['stop_lat', 'stop_lng']].values # values lo convierte a un array de np
-    
+    coords = df[['stop_lat', 'stop_lng']].values # values lo convierte a un array de np    
     # weights para el algoritmo (volumen de los paquetes)
     sample_weights = df['package_volume_cm3'].values
     
     # llevamos a cabo la clusterización
     kmeans = KMeans(n_clusters = k, random_state = 6174, n_init = 10)
     kmeans.fit(coords, sample_weight=sample_weights)
-    
-    # etiquetas de cluster para cada parada
-    labels = kmeans.labels_
-    
+    labels = kmeans.labels_ # etiquetas de cluster para cada parada
+
     # para organizarlos, creamos una lista de listas para los clusters
     clusters = [[] for vehiculo in range(k)] # si k = 3, clusters = [[], [], []]
     for indice, stop_id in enumerate(df['stop_id']): # enumerate hace (0, 'AD')
@@ -53,7 +54,56 @@ def cluster_stops(k):
             if mapped_id != 0:
                 clusters[num_cluster].append(mapped_id)
 
+    # scatterplot clusters
+    # añadimos las etiquetas de cluster al df para poder graficar
+    df['cluster'] = labels
+    
+    # creamos las categorías de volumen de paquetes
+    df['volume_category'] = pd.cut(df['package_volume_cm3'], 
+    bins = [0, 10000, 20000, df['package_volume_cm3'].max() + 1],
+    labels = ['<10k', '10k-20k', '>20k'], right = False)
+
+    plt.figure(figsize=(12, 8))
+    sns.scatterplot(
+        data=df, x = 'stop_lng', y = 'stop_lat', hue = 'cluster',         
+        style = 'volume_category', palette = 'flare', s = 100, alpha = 0.7              
+    )
+    plt.title('Puntos de Entrega Clusterizados', fontsize=16)
+    plt.xlabel('longitud')
+    plt.ylabel('latitud')
+    plt.legend(title='clusters y volumen')
+    plt.grid(True)
+    plt.show()
+
+    # mapa clusters
+    depot_coords = [34.116928, -118.250428] # para centrar el mapa
+    delivery_map = folium.Map(location = depot_coords, tiles = "cartodb positron", zoom_start = 65) # mapa base
+
+    # añadimos un marcador para el depósito
+    folium.Marker(
+        depot_coords, popup = 'UCLA5',
+        icon = folium.Icon(color = 'red', icon = 'industry', prefix = 'fa')
+    ).add_to(delivery_map)
+
+    # lista de colores para los clusters
+    num_clusters = df['cluster'].nunique()
+    colors = sns.color_palette('flare', num_clusters).as_hex()
+    
+    # añadimos cada parada al mapa
+    for i, row in df.iterrows():
+        folium.CircleMarker(
+            location = [row['stop_lat'], row['stop_lng']], radius=5,
+            color=colors[row['cluster']], fill=True, fill_color=colors[row['cluster']],
+            fill_opacity=0.7, popup = f"ID: {row['stop_id']}<br>Cluster: {row['cluster']}<br>Volumen: {row['package_volume_cm3']:.2f} cm³"
+        ).add_to(delivery_map)
+        
+    # guardamos el mapa en un html
+    map_file = './datos/delivery_map.html'
+    delivery_map.save(map_file)
+
     return clusters
+
+
 
 
 def generate_solutions(clusters):
@@ -61,10 +111,9 @@ def generate_solutions(clusters):
     for cluster in clusters:
         # hacemos diferentes permutaciones con el resultado de cada cluster 
         perm = random.sample(cluster, len(cluster))
-        # print(perm)
         route = [0] + perm + [0] # ruta completa
         chromosome.append(route) 
-        # print(individual)
+
     return chromosome
 
 
@@ -73,6 +122,7 @@ def init_population(population_size, clusters):
     for chromo in range(population_size):
         chromosome = generate_solutions(clusters)
         population.append(chromosome)
+
     return population
 
 if __name__ == '__main__':
@@ -99,8 +149,8 @@ if __name__ == '__main__':
     """
 
     # pruebas para inicializar soluciones
-    pop_size = 50
-    population = init_population(pop_size, clusters_result)
+    # pop_size = 50
+    # population = init_population(pop_size, clusters_result)
     
     """
     print(f"{len(population[0])} rutas")
