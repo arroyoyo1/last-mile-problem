@@ -7,6 +7,9 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import folium
 
+time_matrix = np.load('datos/time_matrix.npy')  # matriz de tiempos de viaje entre paradas
+data = pd.read_csv('inputs.csv')
+time_window_data = data[["time_window_start_utc","time_window_end_utc"]]
 
 
 def mapping():
@@ -125,6 +128,191 @@ def init_population(population_size, clusters):
 
     return population
 
+def traffic_func(t_hour, A_m, A_e, mu_m, mu_e, sigma):
+    t = t_hour % 24  # tiempo de 0 a 24
+    # modelado estocastico del trafico dependiendo de la hora
+    peak_m = A_m * np.exp(-(((t-mu_m)**2))/(2*sigma**2))
+    peak_e = A_e * np.exp(-(((t-mu_e)**2))/(2*sigma**2))
+    return 1.0 + peak_m + peak_e
+     
+
+def time_traffic(i, j, t_depart_hour, time_matrix, traffic_params):
+    # tiempo de viaje i a j con trafico
+    base = float(time_matrix[i, j])
+    # parametros de trafico
+    mult = traffic_func(
+        t_hour = t_depart_hour,
+        A_m = traffic_params['A_m'],
+        A_e = traffic_params['A_e'],
+        mu_m = traffic_params['mu_m'],
+        mu_e = traffic_params['mu_e'],
+        sigma = traffic_params['sigma']
+    )
+    # tiempo calculado mas trafico
+    return base * mult
+
+# cambiar el formato en la ventana de tiempo del csv
+def to_seconds_of_day(ts): 
+    if pd.isna(ts):
+        return np.nan
+    return float((ts.hour * 3600) + (ts.minute * 60) + ts.second)
+
+def load_time_windows(csv_path: str, n_nodes: int):
+    # leer las ventanas y aplica la funcion para cambiar el formato
+    df = pd.read_csv(
+        csv_path,
+        parse_dates=['time_window_start_utc', 'time_window_end_utc'],
+    )
+
+    starts = df['time_window_start_utc'].apply(to_seconds_of_day).to_numpy(dtype=float)
+    ends   = df['time_window_end_utc'].apply(to_seconds_of_day).to_numpy(dtype=float)
+
+    # ajusatr a n_nodes
+    if len(starts) < n_nodes:
+        pad = np.full((n_nodes - len(starts),), np.nan, dtype=float)
+        starts = np.concatenate([starts, pad])
+        ends   = np.concatenate([ends,   pad])
+    else:
+        starts = starts[:n_nodes]
+        ends   = ends[:n_nodes]
+
+    return starts, ends
+
+def simulate_route(route, start_time_hour, service_time, time_matrix, traffic_params, tw_start_s=None, tw_end_s=None):
+    
+    # funcion para obtener el tiempo de servicio, en formato de dataframe o de valor unico
+    # esto es por si queremos cambirar el tiempo de servicio por nodo
+    # service_time = 300.0
+    # O
+    # service_time = np.array([0, 300, 300, 0, 0, ...])
+    # por si queremos modificar lo tiempo de servicio por nodo
+    def svc(j):
+        return service_time[j] if hasattr(service_time, "__len__") else float(service_time)
+
+    # listas para acumular resultados
+    current_time = float(start_time_hour)    # horas decimales
+    total_drive = 0.0
+    total_service = 0.0
+    total_wait = 0.0
+    missed_nodes = []
+
+    use_tw = (tw_start_s is not None) and (tw_end_s is not None)
+
+    # esto es lo que devuelve cuando se evalua el chromosoma
+    # se ve asi con el ejemplo de ruta [0, 1, 2, 0]
+    # {'drive': np.float64(648.0753908993297), 'wait': 0.0, 'service': 600.0, 'missed': 0, 
+    # 'missed_nodes': [], 'end_time_hour': np.float64(16.34668760858315)}
+    # Total de tiempo para el cromosoma = 0:20:48.075391
+    # en eso se traduce, esta en segundos, y se calcula la hora final, sin segundos
+    if len(route) < 2:
+        return {"drive": 0.0, "wait": 0.0, "service": 0.0,
+                "missed": 0, "missed_nodes": [], "end_time_hour": current_time % 24.0}
+
+    for idx in range(len(route) - 1):
+        i = route[idx]
+        j = route[idx + 1]
+        t_depart = current_time
+
+        # funcion trafico
+        t_travel_s = time_traffic(i, j, t_depart, time_matrix, traffic_params)
+        # llegada en segundos
+        t_curr_s = current_time * 3600.0
+        t_arrival_s = t_curr_s + t_travel_s
+
+        # ignorar el servicio en el nodo 0
+        if j == 0:
+            t_depart_j_s = t_arrival_s  # regresar al depósito, sin servicio, sin espera
+            total_drive += t_travel_s
+            current_time = (t_depart_j_s / 3600.0) % 24.0
+            continue
+
+        if use_tw and np.isfinite(tw_start_s[j]) and np.isfinite(tw_end_s[j]):
+            arr_mod = t_arrival_s % 86400.0
+            start_j = float(tw_start_s[j])
+            end_j   = float(tw_end_s[j])
+
+            # manejar ventana que cruza medianoche
+            if end_j <= start_j:
+                end_cmp = end_j + 86400.0
+                arr_cmp = arr_mod + 86400.0 if arr_mod < start_j else arr_mod
+            else:
+                end_cmp = end_j
+                arr_cmp = arr_mod
+
+            if arr_cmp < start_j:
+                # espera hasta apertura
+                wait = start_j - arr_cmp
+                t_start_service_s = t_arrival_s + wait
+                t_depart_j_s = t_start_service_s + svc(j)
+                total_wait += wait
+                total_service += svc(j) 
+            elif arr_cmp > end_cmp:
+                # tarde, no se entrega (sin servicio)
+                missed_nodes.append(j)
+                t_depart_j_s = t_arrival_s
+            else:
+                # dentro de ventana
+                t_depart_j_s = t_arrival_s + svc(j)
+                total_service += svc(j) 
+        else:
+            # sin ventana, servir al llegar
+            t_depart_j_s = t_arrival_s + svc(j)
+            total_service += svc(j)     
+
+        total_drive += t_travel_s
+        current_time = (t_depart_j_s / 3600.0) % 24.0
+
+    return {
+        "drive": total_drive,
+        "wait": total_wait,
+        "service": total_service,
+        "missed": len(missed_nodes),
+        "missed_nodes": missed_nodes,
+        "end_time_hour": current_time
+    }
+
+def simulate_chromosome(chromosome, start_time, service_time, time_matrix, traffic_params):
+    results = []
+    for k, route in enumerate(chromosome):
+        m = simulate_route(route, float(start_time[k]), service_time, time_matrix, traffic_params)
+        results.append(m)
+    return results
+
+
+def objective_function(chromosome, start_time, service_time, time_matrix, traffic_params,
+                       distance_matrix, g_k=1.0, M=1e6):
+    """
+    Z = sum(g_k * dist_tot_k) + M * unf
+    Retorna el costo total (a minimizar)
+    """
+    results = simulate_chromosome(chromosome, start_time, service_time, time_matrix, traffic_params)
+    total_distance = 0.0
+    unf = 0  # entregas incumplidas, o restricciones violadas
+    
+    for route in chromosome:
+        # calcular distancia total de cada ruta
+        for idx in range(len(route) - 1):
+            i, j = route[idx], route[idx + 1]
+            total_distance += distance_matrix[i, j]
+    
+    # acumular restricciones incumplidas (si existen)
+    unf += sum(r.get("missed", 0) for r in results)
+    
+    Z = g_k * total_distance + M * unf
+    return Z
+
+
+def fitness(chromosome, start_time, service_time, time_matrix, traffic_params,
+            distance_matrix, g_k=1.0, M=1e6):
+    """
+    fitness = 1 / Z
+    cuanto menor sea el costo, mayor el fitness.
+    """
+    Z = objective_function(chromosome, start_time, service_time, time_matrix,
+                           traffic_params, distance_matrix, g_k, M)
+    return 1.0 / (Z + 1e-9)
+
+
 if __name__ == '__main__':
 
     # pruebas mapping()
@@ -139,8 +327,8 @@ if __name__ == '__main__':
     """
     
     # pruebas cluster_stops()
-    num_vehiculos = 3
-    clusters_result = cluster_stops(k = num_vehiculos)
+    # num_vehiculos = 3
+    # clusters_result = cluster_stops(k = num_vehiculos)
     
     """
     # para verificar la clusterización
@@ -158,3 +346,20 @@ if __name__ == '__main__':
     for i, route in enumerate(population[0]): # (0, [0, 5, 1, 8, 0])
         print(f"ruta {i+1}, longitud {len(route)}, {route}")
     """
+
+    # pruebas para simular rutas con trafico
+
+    tw_start_s, tw_end_s = load_time_windows("inputs.csv", n_nodes=time_matrix.shape[0])
+
+    traffic_params = dict(A_m=0.5, A_e=0.5, mu_m=8.0, mu_e=17.5, sigma=1.25)
+    route = [0, 1, 2, 0]
+    start_time_hour = 16.0 
+    service_time = 300.0 # esto asume 5 min de espera por cada parada(servicio type shi)    
+
+    res = simulate_route(route, start_time_hour, service_time,
+                     time_matrix, traffic_params,
+                     tw_start_s=tw_start_s, tw_end_s=tw_end_s)
+
+    print(res)
+    tot = res["drive"] + res["service"] + res["wait"]
+    print("Total de tiempo para el cromosoma =", __import__("datetime").timedelta(seconds=tot))
