@@ -107,8 +107,6 @@ def cluster_stops(k):
     return clusters
 
 
-
-
 def generate_solutions(clusters):
     chromosome = []
     for cluster in clusters:
@@ -302,6 +300,7 @@ def objective_function(chromosome, start_time, service_time, time_matrix, traffi
     return Z
 
 
+
 def fitness(chromosome, start_time, service_time, time_matrix, traffic_params,
             distance_matrix, g_k=1.0, M=1e6):
     """
@@ -312,6 +311,97 @@ def fitness(chromosome, start_time, service_time, time_matrix, traffic_params,
                            traffic_params, distance_matrix, g_k, M)
     return 1.0 / (Z + 1e-9)
 
+def mutation(chromosome, prob):
+    #Aplica una mutación a un cromosoma dado, con cierta probabilidad. 
+    #Intercambia dos nodos dentro de una ruta aleatoria, dentro de las rutas de un cromosoma
+    mutacion = chromosome
+    if random.random() < prob:
+        #Elegir una ruta aleatoria 
+        route_idx = random.randint(0, len(mutacion) - 1)
+        route = mutacion[route_idx]
+
+        #Solo elegir rutas con longitud mayor a 3
+        if len(route) > 3: 
+            #Elegir dos índices al azar
+            rand_i, rand_j = random.sample(range(1, len(route) - 1), 2)
+
+            #Intercambiar los nodos 
+            route[rand_i], route[rand_j] = route[rand_j], route[rand_i]
+
+            #Reemplazar la ruta
+            mutacion[route_idx] = route
+    #Regresa la ruta modificada
+    return mutacion
+
+def crossover(chromo1, chromo2, prob):
+    import copy
+    #Aplica el cruce de comosomas entre dos de ellos, donde 
+    #se intercambian rutas completas entre dos cromosomas
+    hijo1 = copy.deepcopy(chromo1)
+    hijo2 = copy.deepcopy(chromo2)
+
+
+    if random.random() < prob:
+        route_idx = random.randint(0, len(chromo1) - 1) #Selecciona aleatoriamente indice de la ruta a swappear
+        temp = hijo1[route_idx][1:-1] #Guardar temporalmente ruta del hijo1
+        hijo1[route_idx][1:-1] = hijo2[route_idx][1:-1] #Swappear nodod de hijo1 por nodos de hijo2
+        hijo2[route_idx][1:-1] = temp #Sustituir nodos de ruta2 por nodos de hijo1
+    
+    return hijo1, hijo2
+
+def check_capacity(route, demands, vehicle_capacity):
+    #Recibe la lista de nodos de una ruta, un array de 
+    #demanda de cada nodo, y la capacidad máxima del vehículo
+    total_demand = 0
+    for node in route: 
+        if node != 0: 
+            total_demand += demands[node]
+    return total_demand <= vehicle_capacity
+
+def check_work_time(route, start_time_hour, service_time, time_matrix, traffic_params, max_time):
+    #Revisar si el tiempo total de trabajo de un vehículo
+    #no excede la jornada máxima permitida
+
+    def svc(j):
+        #Si service_time tiene atributo length
+        if hasattr(service_time, "__len__"):
+            #En caso de ser lista, retorna el service_time para el nodo j
+            return float(service_time[j])
+        else:
+            #Retorna el service_time, si service_time es un solo valor (no una lista)
+            return float(service_time)
+    
+    current_time = float(start_time_hour)
+    for idx in range(len(route) - 1):
+        i = route[idx]
+        j = route[idx + 1]
+
+        #Calcular el tiempo de viaje con tráfico
+        travel_time_s = time_traffic(i, j, current_time, time_matrix, traffic_params)
+        travel_time_h = travel_time_s / 3600
+        current_time += travel_time_h
+
+        #Usado para ignorar el servicio en depósito
+        if j != 0: 
+            current_time += svc(j) / 3600 
+    
+    #Si el tiempo total excede el máximo permitido, regresa True
+    if current_time - start_time_hour <= max_time:
+        return True
+    else:
+        return False
+
+#Al parecer, esta función ya la implementa implicitamente la función objetivo
+def check_time_windows(route, arrival_times, tw_start, tw_end):
+    #Regresa la lista de nodos que no cumplen con las restricciones de tiempo o ventanas de tiempo
+    missed_nodes = []
+    for node, arrival in zip(route, arrival_times):
+        if node == 0:
+            continue
+        start, end = tw_start[node], tw_end[node]
+        if arrival < start or arrival > end:
+            missed_nodes.append(node)
+    return missed_nodes
 
 if __name__ == '__main__':
 
@@ -348,7 +438,7 @@ if __name__ == '__main__':
     """
 
     # pruebas para simular rutas con trafico
-
+    """
     tw_start_s, tw_end_s = load_time_windows("inputs.csv", n_nodes=time_matrix.shape[0])
 
     traffic_params = dict(A_m=0.5, A_e=0.5, mu_m=8.0, mu_e=17.5, sigma=1.25)
@@ -363,3 +453,32 @@ if __name__ == '__main__':
     print(res)
     tot = res["drive"] + res["service"] + res["wait"]
     print("Total de tiempo para el cromosoma =", __import__("datetime").timedelta(seconds=tot))
+
+    """
+
+    #Pruebas para mutación
+    '''
+    chromosome = [
+        [0, 1, 2, 3, 0],
+        [0, 4, 5, 6, 0],
+        [0, 7, 8, 9, 0]
+    ]
+    mut = mutation(chromosome, prob = 0.9)
+    print(mut)
+    '''
+
+    """
+    #Pruebas para crossover 
+    chromosome_1 = [
+    [0, 1, 2, 3, 0],
+    [0, 4, 5, 6, 0],
+    [0, 7, 8, 9, 0]]
+
+    chromosome_2 = [
+    [0, 2, 4, 8, 0], 
+    [0, 5, 9, 3, 0], 
+    [0, 4, 6, 7, 0]]
+
+    for _ in range(5):
+        print(crossover(chromosome_1, chromosome_2, 0.9))
+    """
