@@ -403,7 +403,55 @@ def check_time_windows(route, arrival_times, tw_start, tw_end):
             missed_nodes.append(node)
     return missed_nodes
 
-if __name__ == '__main__':
+def genetic_algorithm(clusters, population_size = 50, num_generations = 200, elitism_rate = 0.2, mutation_prob = 0.05, crossover_prob = 0.9, start_time = None, service_time = 300, 
+                      time_matrix = None, distance_matrix = None, traffic_params = None, demands = None, vehicle_capacity = 50000, max_work_time = 8.0):
+    population = init_population(population_size, clusters)
+
+    num_elite = int(elitism_rate * population_size)
+
+    if start_time is None: 
+        start_time = []
+        for _ in range(len(clusters)):
+            start_time.append(8)
+
+    #Loop principal 
+    for gen in range(num_generations):
+        fitness_values = []
+        for chromo in population:
+            fit = fitness(chromosome = chromo, 
+                          start_time = start_time,
+                          service_time= service_time, 
+                          time_matrix = time_matrix, 
+                          traffic_params=traffic_params, 
+                          distance_matrix = distance_matrix)
+            fitness_values.append((fit, chromo))
+        
+        fitness_values.sort(key = lambda x: x[0], reverse = True)
+        ranked_population = []
+        for pair in fitness_values: 
+            fitness_val, chromo = pair
+            ranked_population.append(chromo)
+        
+        #Elitism 
+        new_population = ranked_population[:num_elite]
+
+        #Generar nuevos individuos
+        while len(new_population) < population_size:
+            father_1 = random.choice(ranked_population[:num_elite])
+            father_2 = random.choice(ranked_population[:num_elite])
+
+            #Crossover
+            son_1, son_2 = crossover(son_1, son_2, prob = crossover_prob)
+
+            #Mutation
+            son_1= mutation(son_1, prob = mutation_prob)
+            son_2 = mutation(son_2, prob = mutation_prob)
+
+            new_population.append(son_1)
+            if len(new_population) < population_size:
+                new_population.append(son_2)
+        population = new_population
+
 
     # pruebas mapping()
     # stop2int, int2stop = mapping()
@@ -482,3 +530,4 @@ if __name__ == '__main__':
     for _ in range(5):
         print(crossover(chromosome_1, chromosome_2, 0.9))
     """
+
