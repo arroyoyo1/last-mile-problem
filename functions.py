@@ -3,13 +3,18 @@ import pandas as pd
 from sklearn.cluster import KMeans
 import json
 import random
-import matplotlib.pyplot as plt
 import seaborn as sns
 import folium
+import matplotlib
+matplotlib.use("Agg")  # backend sin GUI, evita Tk
+import matplotlib.pyplot as plt
+
 
 time_matrix = np.load('datos/time_matrix.npy')  # matriz de tiempos de viaje entre paradas
 data = pd.read_csv('inputs.csv')
 time_window_data = data[["time_window_start_utc","time_window_end_utc"]]
+distance_matrix = np.load('datos/distance_matrix.npy')  # matriz de distancias entre paradas
+mean_time = data['planned_service_time_seconds'].mean()  # tiempo promedio de servicio por parada
 
 
 def mapping():
@@ -126,7 +131,7 @@ def init_population(population_size, clusters):
 
     return population
 
-def traffic_func(t_hour, A_m, A_e, mu_m, mu_e, sigma):
+def traffic_func(t_hour, A_m=0.5, A_e=0.5, mu_m=8.0, mu_e=17.0, sigma=1.25):
     t = t_hour % 24  # tiempo de 0 a 24
     # modelado estocastico del trafico dependiendo de la hora
     peak_m = A_m * np.exp(-(((t-mu_m)**2))/(2*sigma**2))
@@ -259,7 +264,7 @@ def simulate_route(route, start_time_hour, service_time, time_matrix, traffic_pa
 
         total_drive += t_travel_s
         current_time = (t_depart_j_s / 3600.0) % 24.0
-
+    
     return {
         "drive": total_drive,
         "wait": total_wait,
@@ -275,6 +280,53 @@ def simulate_chromosome(chromosome, start_time, service_time, time_matrix, traff
         m = simulate_route(route, float(start_time[k]), service_time, time_matrix, traffic_params)
         results.append(m)
     return results
+
+def summarize_by_vehicle(chromosome, sim_out, distance_matrix=None):
+
+    # devolver un resumen por vehículo y total
+
+    routes = []
+    total_drive = total_service = total_wait = 0.0
+    total_missed = 0
+    all_missed_nodes = []
+
+    for k, (route, r) in enumerate(zip(chromosome, sim_out), start=1):
+        item = {
+            "vehicle": k,
+            "drive": float(r["drive"]),
+            "service": float(r["service"]),
+            "wait": float(r["wait"]),
+            "missed": int(r.get("missed", 0)),
+            "missed_nodes": list(r.get("missed_nodes", [])),
+            "end_time_hour": float(r["end_time_hour"]),
+        }
+        # distancia por vehículo (opcional)
+        if distance_matrix is not None:
+            dist = 0.0
+            for i, j in zip(route[:-1], route[1:]):
+                dist += float(distance_matrix[i, j])
+            item["distance"] = dist
+
+        routes.append(item)
+
+        total_drive += item["drive"]
+        total_service += item["service"]
+        total_wait += item["wait"]
+        total_missed += item["missed"]
+        all_missed_nodes.extend(item["missed_nodes"])
+
+    summary = {
+        "drive": total_drive,
+        "service": total_service,
+        "wait": total_wait,
+        "missed": total_missed,
+        "missed_nodes": all_missed_nodes,
+        "n_vehicles": len(routes),
+    }
+    if distance_matrix is not None:
+        summary["distance"] = sum(r.get("distance", 0.0) for r in routes)
+
+    return {"routes": routes, "summary": summary}
 
 
 def objective_function(chromosome, start_time, service_time, time_matrix, traffic_params,
@@ -441,7 +493,7 @@ def genetic_algorithm(clusters, population_size = 50, num_generations = 200, eli
             father_2 = random.choice(ranked_population[:num_elite])
 
             #Crossover
-            son_1, son_2 = crossover(father_1, father_1, prob = crossover_prob)
+            son_1, son_2 = crossover(father_1, father_2, prob = crossover_prob)
 
             #Mutation
             son_1= mutation(son_1, prob = mutation_prob)
@@ -462,6 +514,88 @@ def genetic_algorithm(clusters, population_size = 50, num_generations = 200, eli
     best_fit_val = final_fitness[0][0]
 
     return best_sol, best_fit_val
+
+if __name__ == "__main__":
+
+
+    K = 3 # número de vehículos
+    POP_SIZE = 40 # tamaño de población
+    GENERATIONS = 60 # número de generaciones
+    ELITISM = 0.20 # tasa de elitismo
+    P_CROSS = 0.05 # probabilidad de crossover
+    P_MUT = 0.15 # probabilidad de mutación
+
+    # parámetros de tráfico
+    A_m = 0.5  # amplitud pico matutino
+    A_e = 0.5  # amplitud pico vespertino
+    mu_m = 8.0  # media pico matutino (8 AM)
+    mu_e = 17.5 # media pico vespertino (5:30 PM)
+    sigma = 1.25 # desviación estándar de los picos
+
+    traffic_params = dict(A_m=A_m, A_e=A_e, mu_m=mu_m , mu_e=mu_e, sigma=sigma)
+
+    # tiempos de servicio y salida
+    service_time = mean_time # 5 min por entrega
+    start_times = [16.0] * K  # todos salen a las 16:00 de acuerdo al csv
+
+    clusters = cluster_stops(k=K)  # devuelve K listas de nodos(3)
+
+    # TIP: esta función también dibuja/guarda el mapa en ./datos/delivery_map.html
+
+    # usar el GA
+    best_chromosome, best_fitness = genetic_algorithm(
+        clusters=clusters,
+        population_size=POP_SIZE,
+        num_generations=GENERATIONS,
+        elitism_rate=ELITISM,
+        mutation_prob=P_MUT,
+        crossover_prob=P_CROSS,
+        start_time=start_times,
+        service_time=service_time,
+        time_matrix=time_matrix,
+        distance_matrix=distance_matrix,
+        traffic_params=traffic_params,
+    )
+
+    # ver resultaods
+
+    # Esto es para mostrar los resultados en formato hh:mm:ss, que se vea mejol(hh:mm:ss)
+    def hhmmss(sec):
+        sec = int(round(float(sec)))
+        h, m = divmod(sec, 3600) 
+        m, s = divmod(m, 60)
+        return f"{h:02d}:{m:02d}:{s:02d}"
+
+    # simula el mejor para ver tiempos (sin TW, tal como usa genetic_algorithm ahora)
+
+    sim = simulate_chromosome(best_chromosome, start_times, service_time,
+                              time_matrix, traffic_params)
+    
+    report = summarize_by_vehicle(best_chromosome, sim, distance_matrix=distance_matrix)
+
+    total_drive = sum(r["drive"] for r in sim)
+    total_service = sum(r["service"] for r in sim)
+    total_wait = sum(r["wait"] for r in sim)
+    total_time = total_drive + total_service + total_wait
+
+    print("\nAlgorimto GA")
+    print("Mejor fitness:", best_fitness)
+    print("Mejor ruta por vehiculo(mejor chromosoma):")
+    for v, route in enumerate(best_chromosome, 1):
+        print(f"  Veh {v}: {route}")
+    print("Tiempos por seccion totals:")
+    print("  Conduccion:", hhmmss(total_drive), f"({total_drive:.1f}s)")
+    print("  Servicio  :", hhmmss(total_service), f"({total_service:.1f}s)")
+    print("  Espera    :", hhmmss(total_wait), f"({total_wait:.1f}s)")
+    print("  TOTAL     :", hhmmss(total_time), f"({total_time:.1f}s)")
+
+    print("\nTiempos por vehiculo:")
+    for r in report["routes"]:
+        extra = f", dist={r['distance']:.1f}" if "distance" in r else ""
+        print(f"Veh {r['vehicle']:>2}: Conduccion : {hhmmss(r['drive'])}, "
+            f"Servicio : {hhmmss(r['service'])}, Espera : {hhmmss(r['wait'])}, "
+            f"No entregado : {r['missed']}, Hora fin : {r['end_time_hour']:.2f}h")
+
 
     # pruebas mapping()
     # stop2int, int2stop = mapping()
@@ -540,4 +674,3 @@ def genetic_algorithm(clusters, population_size = 50, num_generations = 200, eli
     for _ in range(5):
         print(crossover(chromosome_1, chromosome_2, 0.9))
     """
-
