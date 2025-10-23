@@ -5,8 +5,6 @@ import json
 import random
 import seaborn as sns
 import folium
-import matplotlib
-matplotlib.use("Agg")  # backend sin GUI, evita Tk
 import matplotlib.pyplot as plt
 
 
@@ -73,7 +71,7 @@ def cluster_stops(k):
 
     plt.figure(figsize=(12, 8))
     sns.scatterplot(
-        data=df, x = 'stop_lng', y = 'stop_lat', hue = 'cluster',         
+        data = df, x = 'stop_lng', y = 'stop_lat', hue = 'cluster',         
         style = 'volume_category', palette = 'flare', s = 100, alpha = 0.7              
     )
     plt.title('Puntos de Entrega Clusterizados', fontsize=16)
@@ -154,30 +152,18 @@ def time_traffic(i, j, t_depart_hour, time_matrix, traffic_params):
     # tiempo calculado mas trafico
     return base * mult
 
-# cambiar el formato en la ventana de tiempo del csv
-def to_seconds_of_day(ts): 
+# cambiar el formato en la ventana de tiempo
+def to_seconds(ts): 
     if pd.isna(ts):
         return np.nan
     return float((ts.hour * 3600) + (ts.minute * 60) + ts.second)
 
-def load_time_windows(csv_path: str, n_nodes: int):
+def load_time_windows():
     # leer las ventanas y aplica la funcion para cambiar el formato
-    df = pd.read_csv(
-        csv_path,
-        parse_dates=['time_window_start_utc', 'time_window_end_utc'],
-    )
+    df = pd.read_csv("inputs.csv", parse_dates = ['time_window_start_utc', 'time_window_end_utc'],)
 
-    starts = df['time_window_start_utc'].apply(to_seconds_of_day).to_numpy(dtype=float)
-    ends   = df['time_window_end_utc'].apply(to_seconds_of_day).to_numpy(dtype=float)
-
-    # ajusatr a n_nodes
-    if len(starts) < n_nodes:
-        pad = np.full((n_nodes - len(starts),), np.nan, dtype=float)
-        starts = np.concatenate([starts, pad])
-        ends   = np.concatenate([ends,   pad])
-    else:
-        starts = starts[:n_nodes]
-        ends   = ends[:n_nodes]
+    starts = df['time_window_start_utc'].apply(to_seconds).to_numpy(dtype = float)
+    ends = df['time_window_end_utc'].apply(to_seconds).to_numpy(dtype = float)
 
     return starts, ends
 
@@ -192,8 +178,8 @@ def simulate_route(route, start_time_hour, service_time, time_matrix, traffic_pa
     def svc(j):
         return service_time[j] if hasattr(service_time, "__len__") else float(service_time)
 
-    # listas para acumular resultados
-    current_time = float(start_time_hour)    # horas decimales
+    # variables para acumular resultados
+    current_time = float(start_time_hour) # horas decimales
     total_drive = 0.0
     total_service = 0.0
     total_wait = 0.0
@@ -209,30 +195,28 @@ def simulate_route(route, start_time_hour, service_time, time_matrix, traffic_pa
     # en eso se traduce, esta en segundos, y se calcula la hora final, sin segundos
     if len(route) < 2:
         return {"drive": 0.0, "wait": 0.0, "service": 0.0,
-                "missed": 0, "missed_nodes": [], "end_time_hour": current_time % 24.0}
+                "missed": 0, "missed_nodes": [], "end_time_hour": current_time % 24.0} # no necesario
 
     for idx in range(len(route) - 1):
         i = route[idx]
         j = route[idx + 1]
         t_depart = current_time
 
-        # funcion trafico
-        t_travel_s = time_traffic(i, j, t_depart, time_matrix, traffic_params)
-        # llegada en segundos
-        t_curr_s = current_time * 3600.0
+        t_travel_s = time_traffic(i, j, t_depart, time_matrix, traffic_params) # funcion trafico
+        t_curr_s = current_time * 3600.0 # llegada en segundos
         t_arrival_s = t_curr_s + t_travel_s
 
         # ignorar el servicio en el nodo 0
         if j == 0:
-            t_depart_j_s = t_arrival_s  # regresar al depósito, sin servicio, sin espera
-            total_drive += t_travel_s
+            t_depart_j_s = t_arrival_s # regresar al depósito, sin servicio ni espera obvio
+            total_drive += t_travel_s 
             current_time = (t_depart_j_s / 3600.0) % 24.0
             continue
 
         if use_tw and np.isfinite(tw_start_s[j]) and np.isfinite(tw_end_s[j]):
             arr_mod = t_arrival_s % 86400.0
             start_j = float(tw_start_s[j])
-            end_j   = float(tw_end_s[j])
+            end_j = float(tw_end_s[j])
 
             # manejar ventana que cruza medianoche
             if end_j <= start_j:
@@ -279,6 +263,7 @@ def simulate_chromosome(chromosome, start_time, service_time, time_matrix, traff
     for k, route in enumerate(chromosome):
         m = simulate_route(route, float(start_time[k]), service_time, time_matrix, traffic_params)
         results.append(m)
+
     return results
 
 def summarize_by_vehicle(chromosome, sim_out, distance_matrix=None):
@@ -290,6 +275,7 @@ def summarize_by_vehicle(chromosome, sim_out, distance_matrix=None):
     total_missed = 0
     all_missed_nodes = []
 
+    # creamos el diccionario del vehículo
     for k, (route, r) in enumerate(zip(chromosome, sim_out), start=1):
         item = {
             "vehicle": k,
@@ -349,8 +335,8 @@ def objective_function(chromosome, start_time, service_time, time_matrix, traffi
     unf += sum(r.get("missed", 0) for r in results)
     
     Z = g_k * total_distance + M * unf
-    return Z
 
+    return Z
 
 
 def fitness(chromosome, start_time, service_time, time_matrix, traffic_params,
@@ -362,6 +348,7 @@ def fitness(chromosome, start_time, service_time, time_matrix, traffic_params,
     Z = objective_function(chromosome, start_time, service_time, time_matrix,
                            traffic_params, distance_matrix, g_k, M)
     return 1.0 / (Z + 1e-9)
+
 
 def mutation(chromosome, prob):
     #Aplica una mutación a un cromosoma dado, con cierta probabilidad. 
@@ -587,6 +574,7 @@ if __name__ == "__main__":
                               time_matrix, traffic_params)
     
     report = summarize_by_vehicle(best_chromosome, sim, distance_matrix=distance_matrix)
+    print(report)
 
     total_drive = sum(r["drive"] for r in sim)
     total_service = sum(r["service"] for r in sim)
@@ -663,7 +651,9 @@ if __name__ == "__main__":
 
     # pruebas para simular rutas con trafico
     """
-    tw_start_s, tw_end_s = load_time_windows("inputs.csv", n_nodes=time_matrix.shape[0])
+    tw_start_s, tw_end_s = load_time_windows()
+    print(tw_start_s)
+    print(tw_end_s)
 
     traffic_params = dict(A_m=0.5, A_e=0.5, mu_m=8.0, mu_e=17.5, sigma=1.25)
     route = [0, 1, 2, 0]
