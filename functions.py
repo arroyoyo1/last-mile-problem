@@ -467,6 +467,13 @@ def genetic_algorithm(clusters, population_size = 50, num_generations = 200, eli
             start_time.append(8)
 
     #Loop principal 
+
+    EPS = 1e-9 #
+    history = {#
+        "best_fit": [],#
+        "best_Z": []#
+    }#
+
     for gen in range(num_generations):
         fitness_values = []
         for chromo in population:
@@ -479,7 +486,14 @@ def genetic_algorithm(clusters, population_size = 50, num_generations = 200, eli
             fitness_values.append((fit, chromo))
         
         fitness_values.sort(key = lambda x: x[0], reverse = True)
-        ranked_population = []
+
+        ranked_population = [ch for (fit, ch) in fitness_values] # quita esto si no
+
+        fits = [fv[0] for fv in fitness_values] #
+        best_fit = fits[0] #
+        history["best_fit"].append(best_fit) #
+        history["best_Z"].append(1.0 / best_fit - EPS) #
+
         for pair in fitness_values: 
             fitness_val, chromo = pair
             ranked_population.append(chromo)
@@ -513,7 +527,8 @@ def genetic_algorithm(clusters, population_size = 50, num_generations = 200, eli
     best_sol = final_fitness[0][1]
     best_fit_val = final_fitness[0][0]
 
-    return best_sol, best_fit_val
+
+    return best_sol, best_fit_val, history #
 
 if __name__ == "__main__":
 
@@ -543,7 +558,7 @@ if __name__ == "__main__":
     # TIP: esta función también dibuja/guarda el mapa en ./datos/delivery_map.html
 
     # usar el GA
-    best_chromosome, best_fitness = genetic_algorithm(
+    best_chromosome, best_fitness, history = genetic_algorithm(
         clusters=clusters,
         population_size=POP_SIZE,
         num_generations=GENERATIONS,
@@ -578,12 +593,12 @@ if __name__ == "__main__":
     total_wait = sum(r["wait"] for r in sim)
     total_time = total_drive + total_service + total_wait
 
-    print("\nAlgorimto GA")
+    print("\nAlgoritmo GA")
     print("Mejor fitness:", best_fitness)
     print("Mejor ruta por vehiculo(mejor chromosoma):")
     for v, route in enumerate(best_chromosome, 1):
         print(f"  Veh {v}: {route}")
-    print("Tiempos por seccion totals:")
+    print("Tiempos por seccion total:")
     print("  Conduccion:", hhmmss(total_drive), f"({total_drive:.1f}s)")
     print("  Servicio  :", hhmmss(total_service), f"({total_service:.1f}s)")
     print("  Espera    :", hhmmss(total_wait), f"({total_wait:.1f}s)")
@@ -596,6 +611,23 @@ if __name__ == "__main__":
             f"Servicio : {hhmmss(r['service'])}, Espera : {hhmmss(r['wait'])}, "
             f"No entregado : {r['missed']}, Hora fin : {r['end_time_hour']:.2f}h")
 
+    plt.figure()
+    plt.plot(history["best_fit"], label="Best fitness")
+    plt.xlabel("Generación")
+    plt.ylabel("Fitness (1/Z)")
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig("ga_fitness.png", dpi=150)
+
+    plt.figure()
+    plt.plot(history["best_Z"], label="Best Z")
+    plt.xlabel("Generación")
+    plt.ylabel("Costo Z")
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig("ga_cost.png", dpi=150)
+
+    print("Guardado como: ga_fitness.png y ga_cost.png")
 
     # pruebas mapping()
     # stop2int, int2stop = mapping()
