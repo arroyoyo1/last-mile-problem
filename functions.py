@@ -5,6 +5,8 @@ import json
 import random
 import seaborn as sns
 import folium
+# import matplotlib
+# matplotlib.use("Agg")  # backend sin GUI, evita Tk
 import matplotlib.pyplot as plt
 
 
