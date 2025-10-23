@@ -441,7 +441,7 @@ def genetic_algorithm(clusters, population_size = 50, num_generations = 200, eli
             father_2 = random.choice(ranked_population[:num_elite])
 
             #Crossover
-            son_1, son_2 = crossover(son_1, son_2, prob = crossover_prob)
+            son_1, son_2 = crossover(father_1, father_1, prob = crossover_prob)
 
             #Mutation
             son_1= mutation(son_1, prob = mutation_prob)
@@ -451,7 +451,17 @@ def genetic_algorithm(clusters, population_size = 50, num_generations = 200, eli
             if len(new_population) < population_size:
                 new_population.append(son_2)
         population = new_population
+    
+    #Resultados finales
+    final_fitness = []
+    for chromo in population:
+        fit_value = fitness(chromo, start_time, service_time, time_matrix, traffic_params, distance_matrix)
+        final_fitness.append((fit_value, chromo))
+    
+    best_sol = final_fitness[0][1]
+    best_fit_val = final_fitness[0][0]
 
+    return best_sol, best_fit_val
 
     # pruebas mapping()
     # stop2int, int2stop = mapping()
