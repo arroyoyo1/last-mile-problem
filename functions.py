@@ -5,8 +5,6 @@ import json
 import random
 import seaborn as sns
 import folium
-# import matplotlib
-# matplotlib.use("Agg")  # backend sin GUI, evita Tk
 import matplotlib.pyplot as plt
 import datetime
 import os
@@ -14,7 +12,7 @@ from matrices import matrices
 
 cost_km = 7.5
 
-def load_all_data():
+def load_data():
     data = pd.read_csv('inputs.csv')
     distance_matrix = np.load('datos/distance_matrix.npy')
     time_matrix = np.load('datos/time_matrix.npy')
@@ -26,7 +24,8 @@ def load_all_data():
         
     return data, distance_matrix, time_matrix, stop2int, int2stop
 
-def load_lookups(data, stop2int):
+
+def preprocess(data, stop2int):
     # mapeamos stop_id a todos los datos asociados relevantes
     data_lookup = data.set_index('stop_id')
     
@@ -71,8 +70,11 @@ def load_lookups(data, stop2int):
                                          datetime.datetime.fromisoformat(tw_end_str).minute * 60 +
                                          datetime.datetime.fromisoformat(tw_end_str).second)
             except KeyError:
-                # This might happen if stop_ids.npy is out of sync with inputs.csv omg!
-                print(f"Warning: stop_id '{stop_str}' (int: {stop_int}) not found in inputs.csv. Using defaults.")
+                # esto podría pasar si stops_ids no está sincronizado con el csv de inputs
+                # pero si antes se corre check_and_generate, entonces esto no es importante,
+                # solo es si por alguna razón, en la app, se agrega un nodo y no se actualiza
+                # en el archivo de inputs
+                print(f"{stop_str}' (int: {stop_int}) no está en inputs")
                 service_times[stop_int] = 0
                 volumes[stop_int] = 0
                 tw_starts[stop_int] = None
@@ -80,9 +82,6 @@ def load_lookups(data, stop2int):
                 
     return service_times, volumes, tw_starts, tw_ends, depot_start_seconds
 
-"""time_matrix = np.load('datos/time_matrix.npy')  # matriz de tiempos de viaje entre paradas
-distance_matrix = np.load('datos/distance_matrix.npy')  # matriz de distancias entre paradas
-mean_time = data['planned_service_time_seconds'].mean()  # tiempo promedio de servicio por parada"""
 
 def mapping():
     stop_ids = np.load('datos/stop_ids.npy') # cargamos el array de stop_ids
@@ -299,7 +298,7 @@ def simulate_chromosome(chromosome, start_time_s, time_matrix, distance_matrix,t
     return metrics_list
 
 
-def summarize_by_vehicle(metrics_list):
+def route_report(metrics_list):
     route_summaries = []
     sol_drive_s = 0
     sol_service_s = 0
@@ -391,7 +390,7 @@ def selection(pop_scores, num_parents):
     
     return parents, best_individual, best_fitness, best_cost
 
-def one_point_crossover(parent1, parent2):
+def crossover(parent1, parent2):
     num_routes = len(parent1) 
     if num_routes < 2:
         return parent1, parent2 # esto solo pasa si el número de padres es impar
@@ -423,7 +422,7 @@ def genetic_algorithm(data, distance_matrix, time_matrix, stop2int, num_generati
     num_vehicles_k, mutation_rate, elitism_size, max_capacity_cm3, max_work_time_hours, traffic_params):
 
     # 1. extraemos los datos del dataset
-    service_times, volumes, tw_starts, tw_ends, depot_start_s = load_lookups(data, stop2int)
+    service_times, volumes, tw_starts, tw_ends, depot_start_s = preprocess(data, stop2int)
     
     # 2. clusterizamos paradas
     clusters, dframe = cluster_stops(num_vehicles_k, data, stop2int)
@@ -448,7 +447,7 @@ def genetic_algorithm(data, distance_matrix, time_matrix, stop2int, num_generati
             # simulamos cada ruta
             metrics_list = simulate_chromosome(individual, depot_start_s, time_matrix, distance_matrix, traffic_params, service_times, tw_starts, tw_ends)
             # resumen de cada ruta
-            summary_report = summarize_by_vehicle(metrics_list)
+            summary_report = route_report(metrics_list)
             
             # checa las restricciones
             cap_violations = check_capacity(individual, volumes, max_capacity_cm3)
@@ -479,7 +478,7 @@ def genetic_algorithm(data, distance_matrix, time_matrix, stop2int, num_generati
                 parents.append(random.choice(population_with_fitness)[1]) # añadir uno aleatorio si faltan
             
             parent1, parent2 = random.sample(parents, 2)
-            child1, child2 = one_point_crossover(parent1, parent2)
+            child1, child2 = crossover(parent1, parent2)
 
             new_population.append(mutation(child1, mutation_rate))
             if len(new_population) < population_size:
@@ -491,7 +490,7 @@ def genetic_algorithm(data, distance_matrix, time_matrix, stop2int, num_generati
     
     # encuentra el resumen de la mejor solución
     final_metrics = simulate_chromosome(best_solution_overall, depot_start_s, time_matrix, distance_matrix, traffic_params, service_times, tw_starts, tw_ends)
-    final_summary_report = summarize_by_vehicle(final_metrics)
+    final_summary_report = route_report(final_metrics)
 
     return best_solution_overall, final_summary_report, history, dframe
 
@@ -529,7 +528,7 @@ if __name__ == "__main__":
     check_and_generate_data()
     
     # cargamos los datos
-    (data, dist_matrix, time_matrix, stop2int, int2stop) = load_all_data()
+    (data, dist_matrix, time_matrix, stop2int, int2stop) = load_data()
 
     if data is not None:
         # parámetros
