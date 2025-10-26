@@ -27,9 +27,9 @@ def matrices():
     stops_df = df[['stop_id', 'stop_lat', 'stop_lng']]
 
     # hacemos una lista de todas las coordenadas con su respectivo stop_id
-    depot_lat, depot_lon = (34.116928, -118.250428)
+    depot_lat, depot_lon = (20.613801, -100.402868) 
     coords = [(depot_lat, depot_lon)] + list(zip(stops_df['stop_lat'], stops_df['stop_lng'])) # zip empareja lat y lon
-    stop_ids = ['UCLA5'] + list(stops_df['stop_id'])
+    stop_ids = ['Lucina'] + list(stops_df['stop_id'])
     
     num_locations = len(coords)
     distance_matrix = np.zeros((num_locations, num_locations))
@@ -57,9 +57,9 @@ if __name__ == '__main__':
     dist_matrix, time_matrix, stop_ids = matrices()
 
     # guardamos matrices
-    np.save('distance_matrix.npy', dist_matrix)
-    np.save('time_matrix.npy', time_matrix)
-    np.save('stop.ids.npy', stop_ids)
+    np.save('datos/distance_matrix.npy', dist_matrix)
+    np.save('datos/time_matrix.npy', time_matrix)
+    np.save('datos/stop_ids.npy', stop_ids)
     dist_matrix = np.load('datos/distance_matrix.npy')
     time_matrix = np.load('datos/time_matrix.npy')
     stop_ids = np.load("datos/stop_ids.npy")

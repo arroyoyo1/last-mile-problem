@@ -62,19 +62,29 @@ def preprocess(data, stop2int):
                     tw_starts[stop_int] = None
                     tw_ends[stop_int] = None
                 else:
-                    # convertimos datetime a segundos pero ahora para las tw
-                    tw_starts[stop_int] = (datetime.datetime.fromisoformat(tw_start_str).hour * 3600 +
-                                           datetime.datetime.fromisoformat(tw_start_str).minute * 60 +
-                                           datetime.datetime.fromisoformat(tw_start_str).second)
-                    tw_ends[stop_int] = (datetime.datetime.fromisoformat(tw_end_str).hour * 3600 +
-                                         datetime.datetime.fromisoformat(tw_end_str).minute * 60 +
-                                         datetime.datetime.fromisoformat(tw_end_str).second)
+                    try: # convertimos los datetime a segundos
+                        dt_start = datetime.datetime.strptime(tw_start_str, '%d/%m/%Y %H:%M')
+                        dt_end = datetime.datetime.strptime(tw_end_str, '%d/%m/%Y %H:%M')
+                        tw_starts[stop_int] = (dt_start.hour * 3600 + dt_start.minute * 60 + dt_start.second)
+                        tw_ends[stop_int] = (dt_end.hour * 3600 + dt_end.minute * 60 + dt_end.second)
+                    
+                    except ValueError:
+                        # si no está en formato día/mes/año entonces intenta con formato dia-mes-año
+                        try:
+                            dt_start = datetime.datetime.fromisoformat(tw_start_str)
+                            dt_end = datetime.datetime.fromisoformat(tw_end_str)
+                            tw_starts[stop_int] = (dt_start.hour * 3600 + dt_start.minute * 60 + dt_start.second)
+                            tw_ends[stop_int] = (dt_end.hour * 3600 + dt_end.minute * 60 + dt_end.second)
+                        except ValueError: # si de plano la fecha está rarísima, entonces la ignoramos
+                            print(f"No se reconoce el formaro de fecha para la parada {stop_str}")
+                            tw_starts[stop_int] = None
+                            tw_ends[stop_int] = None
             except KeyError:
                 # esto podría pasar si stops_ids no está sincronizado con el csv de inputs
                 # pero si antes se corre check_and_generate, entonces esto no es importante,
                 # solo es si por alguna razón, en la app, se agrega un nodo y no se actualiza
                 # en el archivo de inputs
-                print(f"{stop_str}' (int: {stop_int}) no está en inputs")
+                print(f"{stop_str}' no está en inputs")
                 service_times[stop_int] = 0
                 volumes[stop_int] = 0
                 tw_starts[stop_int] = None
@@ -147,12 +157,12 @@ def cluster_stops(k, data, stop2int):
     plt.show()
 
     # mapa clusters
-    depot_coords = [34.116928, -118.250428] # para centrar el mapa
-    delivery_map = folium.Map(location = depot_coords, tiles = "cartodb positron", zoom_start = 65) # mapa base
+    depot_coords = [20.613801, -100.402868] # para centrar el mapa
+    delivery_map = folium.Map(location = depot_coords, tiles = "cartodb positron", zoom_start = 12) # mapa base
 
     # añadimos un marcador para el depósito
     folium.Marker(
-        depot_coords, popup = 'UCLA5',
+        depot_coords, popup = 'Lucina',
         icon = folium.Icon(color = 'red', icon = 'industry', prefix = 'fa')
     ).add_to(delivery_map)
 
@@ -507,23 +517,15 @@ if __name__ == "__main__":
         dist_file = 'datos/distance_matrix.npy'
         time_file = 'datos/time_matrix.npy'
         ids_file = 'datos/stop_ids.npy'
-        s2i_file = 'datos/stop2int.json'
-        i2s_file = 'datos/int2stop.json'
         
-        files_to_check = [dist_file, time_file, ids_file, s2i_file, i2s_file]
+        # generamos las matrices necesarias 
+        dist_matrix, time_matrix, stop_ids = matrices()
+        np.save(dist_file, dist_matrix)
+        np.save(time_file, time_matrix)
+        np.save(ids_file, stop_ids)
+
+        mapping()
         
-        # verificamos si falta algún archivo
-        if not all(os.path.exists(f) for f in files_to_check):
-            
-            # generamos las matrices necesarias 
-            dist_matrix, time_matrix, stop_ids = matrices()
-            np.save(dist_file, dist_matrix)
-            np.save(time_file, time_matrix)
-            np.save(ids_file, stop_ids)
-
-            # mapeos
-            mapping()
-
     # entonces como digo, esto verificación y genera los datos necesarios independiente de cualquier cambio al data set
     check_and_generate_data()
     
@@ -532,7 +534,7 @@ if __name__ == "__main__":
 
     if data is not None:
         # parámetros
-        genes = 50  # genes not as in rutas sino de generaciones/iteraciones del algoritmo lol
+        genes = 50  # genes not as in rutas, sino genes de generaciones/iteraciones del algoritmo lol
         pop_size = 100
         mut_rate = 0.1
         elitism_rate = 0.2 
